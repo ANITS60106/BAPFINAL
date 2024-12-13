@@ -1,15 +1,9 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from collections import defaultdict
+import json
 
-log_data = [
-    {"user": "User2", "time": "2024-12-01 12:00", "action": "login"},
-    {"user": "User1", "time": "2024-12-01 13:30", "action": "logout"},
-    {"user": "User3", "time": "2024-12-01 14:00", "action": "login"},
-    {"user": "User2", "time": "2024-12-01 16:00", "action": "logout"},
-    {"user": "User1", "time": "2024-12-01 17:00", "action": "login"},
-    {"user": "User3", "time": "2024-12-01 17:30", "action": "logout"}
-]
-
+with open('log_data.json', 'r') as file:
+    log_data = json.load(file)
 
 for log in log_data:
     log["time"] = datetime.strptime(log["time"], "%Y-%m-%d %H:%M")
@@ -45,13 +39,8 @@ average_time = total_time / total_sessions / 3600 if total_sessions else 0
 
 total_durations = {user: sum((end - start).total_seconds() / 3600 for start, end in sessions) for user, sessions in finished_sessions.items()}
 
-
-most_active_user = None
-most_active_time = 0
-for user, total_time in total_durations.items():
-    if total_time > most_active_time:
-        most_active_time = total_time
-        most_active_user = user
+most_active_user = max(total_durations, key=total_durations.get, default=None)
+most_active_time = total_durations.get(most_active_user, 0)
 
 open_sessions = {user: times for user, times in active_sessions.items() if times}
 
@@ -64,11 +53,52 @@ for user, session in longest_sessions.items():
 
 print(f"\nСреднее время пребывания всех пользователей: {average_time:.2f} часов")
 
-
-print("\nСамый активный пользователь:")
+print("\nСамый активный пользователь по суммарной длительности сессий:")
 if most_active_user:
     print(f"{most_active_user} с {most_active_time:.2f} часами")
 
 print("\nНезакрытые сессии:")
 for user, times in open_sessions.items():
     print(f"{user}: {times}")
+
+def find_login_anomalies(log_data):
+    anomalies = defaultdict(list)
+    active_sessions = defaultdict(list)
+    logout_times = defaultdict(list)
+
+    last_action = defaultdict(str)
+
+    for log in log_data:
+        user = log["user"]
+        action = log["action"]
+        time = log["time"]
+
+        if action == "login":
+            if last_action[user] == "login":
+                anomalies[user].append(f"Последовательные логины в {time}")
+            if time in active_sessions[user]:
+                anomalies[user].append(f"Повторный логин в {time}")
+            active_sessions[user].append(time)
+            last_action[user] = "login"
+        elif action == "logout":
+            if last_action[user] == "logout":
+                anomalies[user].append(f"Последовательные логауты в {time}")
+            if time in logout_times[user]:
+                anomalies[user].append(f"Повторный логаут в {time}")
+            logout_times[user].append(time)
+            if active_sessions[user]:
+                start_time = active_sessions[user].pop(0)
+                if (time - start_time) <= timedelta(minutes=1):
+                    anomalies[user].append(f"Сессия {start_time} - {time} длительностью менее 1 минуты")
+            last_action[user] = "logout"
+
+    return anomalies
+
+anomalies = find_login_anomalies(log_data)
+
+if anomalies:
+    print("Найдены аномалии с несколькими активными сессиями:")
+    for user, messages in anomalies.items():
+        print(f"{user}: {', '.join(messages)}")
+else:
+    print("Аномалий не найдено.")
